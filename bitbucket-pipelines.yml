@@ -1,0 +1,100 @@
+image: atlassian/default-image:4
+
+definitions: 
+  services:
+    aws-cli:
+      image: amazon/aws-cli:2.x
+      variables:
+        AWS_ACCESS_KEY_ID: $AWS_ACCESS_KEY_ID
+        AWS_SECRET_ACCESS_KEY: $AWS_SECRET_ACCESS_KEY
+        AWS_DEFAULT_REGION: $AWS_REGION
+        AWS_ACCOUNT_ID: $AWS_ACCOUNT_ID
+
+  steps:
+    - step: &build-docker
+        name: Build and Push Docker Image
+        caches:
+          - docker
+        services:
+          - docker
+        script:
+          - apt-get update
+          - apt-get install -y python3-pip
+          - pip3 install awscli
+          - export DOCKER_IMAGE_TAG=$BITBUCKET_COMMIT
+          - docker build -t api .
+          - docker tag api:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/api:latest
+          - docker tag api:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/api:$DOCKER_IMAGE_TAG
+          - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+          - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/api:latest
+          - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/api:$DOCKER_IMAGE_TAG
+
+pipelines:
+  default:
+    - step:
+        name: Build and Test
+        caches:
+          - node
+        script:
+          - npm install
+          - npm run test:ci
+
+  custom:
+    semver-release:
+      - step:
+          name: Semantic Versioning and Release
+          caches:
+            - node
+          script:
+            - npm install
+            - git fetch origin develop
+            - git checkout -B pr-${BITBUCKET_PR_ID} origin/develop
+            - npm run release  # This script will bump the version
+            - git push --follow-tags  # Push the new version and tags to the repository
+  
+  branches:
+    staging:
+      - step: *build-docker
+      - step:
+          name: Deploy to ECS Staging
+          deployment: staging
+          script:
+            - pipe: atlassian/aws-ecs-deploy:1.10.1
+              variables:
+                AWS_ACCOUNT_ID: $AWS_ACCOUNT_ID
+                AWS_ACCESS_KEY_ID: $AWS_ACCESS_KEY_ID
+                AWS_SECRET_ACCESS_KEY: $AWS_SECRET_ACCESS_KEY
+                AWS_REGION: $AWS_REGION
+                AWS_DEFAULT_REGION: $AWS_DEFAULT_REGION
+                CLUSTER_NAME: api-staging
+                SERVICE_NAME: api-staging-service
+                IMAGE_NAME: $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/api:$DOCKER_IMAGE_TAG
+                TASK_DEFINITION: 'task-definition.json'
+            - echo 'Updating ECS Service to run the new Docker image'
+            - apt-get update
+            - apt-get install -y python3-pip
+            - pip3 install awscli
+            - aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+            - aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+            - aws configure set region $AWS_REGION
+            - aws ecs update-service --cluster api-staging --service api-staging-service --force-new-deployment
+
+    main:
+      - step: *build-docker
+      - step:
+          name: Deploy to ECS Production
+          deployment: production
+          script:
+            - pipe: atlassian/aws-ecs-deploy:1.10.1
+              variables:
+                AWS_ACCOUNT_ID: $AWS_ACCOUNT_ID
+                AWS_ACCESS_KEY_ID: $AWS_ACCESS_KEY_ID
+                AWS_SECRET_ACCESS_KEY: $AWS_SECRET_ACCESS_KEY
+                AWS_REGION: $AWS_REGION
+                AWS_DEFAULT_REGION: $AWS_DEFAULT_REGION
+                CLUSTER_NAME: api-prod
+                SERVICE_NAME: api-prod-service
+                IMAGE_NAME: $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/api:$DOCKER_IMAGE_TAG
+                TASK_DEFINITION: 'task-definition-prod.json'
+            - echo 'Updating ECS Service to run the new Docker image'
+            - aws ecs update-service --cluster your-production-ecs-cluster --service your-production-ecs-service --force-new-deployment

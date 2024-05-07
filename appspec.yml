@@ -1,0 +1,9 @@
+version: 0.0
+Resources:
+  - TargetService:
+      Type: AWS::ECS::Service
+      Properties:
+        TaskDefinition: arn:aws:ecs:ap-southeast-2:370041594209:task-definition/api:4
+        LoadBalancerInfo:
+          ContainerName: "app" # Replace "container-name" with your actual container name
+          ContainerPort: 80 # Replace 80 with the port your container listens on

@@ -1,0 +1,39 @@
+# Buildspec for AWS codepipeline to build and deploy docker-compose app
+version: 0.2
+
+phases:    
+  pre_build:
+    commands:
+      - echo log in to Amazon ECR...
+      - ECR_PASSWORD=$(aws ecr get-login-password --region $AWS_DEFAULT_REGION)
+      - echo $ECR_PASSWORD | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - if [ -z "$DOCKER_HUB_PASSWORD" ]; then echo "DOCKER_HUB_PASSWORD is not set"; exit 1; fi
+      - if [ -z "$DOCKER_HUB_USERNAME" ]; then echo "DOCKER_HUB_USERNAME is not set"; exit 1; fi
+      - echo "Logging in to Docker Hub..."
+      - echo $DOCKER_HUB_PASSWORD | docker login --username $DOCKER_HUB_USERNAME --password-stdin
+
+      # - export DOCKER_BUILDKIT=0
+      # - export COMPOSE_DOCKER_CLI_BUILD=0
+      - cp docker-compose.staging.yml docker-compose.yml
+      - chmod +x .platform/hooks/prebuild/*.sh
+  build:
+    commands:
+      - echo Build started on `date`
+      - echo Building the Docker-compose application...
+      - docker build -t api .
+      - docker tag api:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/api:latest
+      - docker tag api:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/api:$CODEBUILD_RESOLVED_SOURCE_VERSION
+      - 
+
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Pushing the Docker images...
+      - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/api:latest
+      - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/api:$CODEBUILD_RESOLVED_SOURCE_VERSION
+artifacts:
+  files:
+    - 'docker-compose.yml'
+    - '.env'
+    - .platform/**/*
+  name: build-artifact

@@ -1,0 +1,13 @@
+# custom overcommit for redis
+sudo nano /etc/sysctl.d/99-custom-overcommit.conf
+# Redis
+vm.overcommit_memory = 1
+vm.swappiness = 10
+
+# Elasticsearch
+vm.max_map_count=262144
+
+sudo sysctl --system
+
+
+# 

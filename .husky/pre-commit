@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# Prettify
+npm run prettify
+
+# Test
+# npm run test:ci temp removeed for now
